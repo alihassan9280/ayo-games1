@@ -1,0 +1,76 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>AYO Gateway Admin</title>
+<style>
+*{box-sizing:border-box}body{font:15px system-ui;margin:0;background:#f4f6f5;color:#16231c}
+header{background:#14532d;color:#fff;padding:12px 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+header b{margin-right:auto}nav button{background:#1f6b3e;color:#fff;border:0;padding:8px 10px;border-radius:8px;margin:2px}
+nav button.on{background:#fff;color:#14532d}main{padding:12px 16px;max-width:1100px;margin:auto}
+.card{background:#fff;border-radius:12px;padding:14px;margin:10px 0;box-shadow:0 1px 3px #0001}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.k{font-size:13px;color:#5b6b62}.v{font-size:22px;font-weight:700}
+input,select,button.b{font:inherit;padding:9px;border-radius:8px;border:1px solid #bcc7c0;margin:3px 0}
+button.b{background:#1a7f4b;color:#fff;border:0}button.w{background:#b3261e}button.g{background:#e6ece8;color:#16231c}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 6px;border-bottom:1px solid #e3e8e5;text-align:left;vertical-align:top}
+.tw{overflow-x:auto}.pill{padding:2px 7px;border-radius:9px;font-size:12px;background:#e6ece8}
+.paid,.matched,.online{background:#d3f0dd;color:#116b3a}.rejected,.offline,.cancelled{background:#fbdcd9;color:#8c1d16}
+.unmatched,.open{background:#fff1c2;color:#7a5a00}[hidden]{display:none}#msg{position:fixed;bottom:12px;left:12px;right:12px;background:#16231c;color:#fff;padding:10px;border-radius:8px}
+.bar{height:8px;background:#1a7f4b;border-radius:4px}
+</style></head><body>
+<header><b>AYO · Easypaisa Gateway</b>
+<input id=key type=password placeholder="ADMIN_KEY" autocomplete=off style="max-width:220px">
+<nav><button data-t=dash class=on>Dashboard</button><button data-t=pay>Payments</button><button data-t=ord>Orders</button><button data-t=dev>Devices</button><button data-t=aud>Audit</button></nav></header>
+<main>
+<section id=dash><div class=grid id=kpi></div><div class=card><b>Last 7 days</b><div id=days></div></div><div class=card><b>Payment phones</b><div id=devs></div></div></section>
+<section id=pay hidden><div class=card>
+ <input id=pq placeholder="Search Trx ID / name / number / order"> <select id=ps><option value="">All</option><option>unmatched</option><option>matched</option><option>rejected</option><option>refunded</option></select>
+ <button class=b onclick=loadPay()>Search</button> <button class="b g" onclick=csv()>Export CSV</button></div>
+ <div class="card tw"><table id=pt></table></div></section>
+<section id=ord hidden><div class=card>
+ <input id=oa inputmode=decimal placeholder="Amount" style="width:110px"> <input id=on placeholder="Note"> <button class=b onclick=mkOrd()>Create order</button>
+ <select id=os onchange=loadOrd()><option value="">All</option><option>open</option><option>paid</option><option>expired</option><option>cancelled</option></select></div>
+ <div class="card tw"><table id=ot></table></div></section>
+<section id=dev hidden><div class=card><input id=dn placeholder="Phone name"> <button class=b onclick=mkDev()>Register phone</button><pre id=dout style="white-space:pre-wrap;word-break:break-all"></pre></div>
+ <div class="card tw"><table id=dt></table></div></section>
+<section id=aud hidden><div class="card tw"><table id=at></table></div></section>
+</main><div id=msg hidden></div>
+<script>
+const $=i=>document.getElementById(i);
+try{$('key').value=sessionStorage.getItem('k')||''}catch(e){}
+$('key').onchange=()=>{try{sessionStorage.setItem('k',$('key').value)}catch(e){}refresh()};
+function toast(t){$('msg').textContent=t;$('msg').hidden=false;setTimeout(()=>$('msg').hidden=true,3500)}
+async function api(m,u,b){const r=await fetch(u,{method:m,headers:{'Content-Type':'application/json','X-Admin-Key':$('key').value},body:b?JSON.stringify(b):undefined});
+ let d=null;try{d=await r.json()}catch(e){} if(!r.ok){toast((d&&d.error)||('HTTP '+r.status));throw new Error()}return d}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function pk(t){return t?new Date(t).toLocaleString():''}
+function pill(s){return `<span class="pill ${esc(s)}">${esc(s)}</span>`}
+function table(id,head,rows){$(id).innerHTML='<tr>'+head.map(h=>'<th>'+h+'</th>').join('')+'</tr>'+(rows.join('')||'<tr><td colspan=9>Nothing yet</td></tr>')}
+let tab='dash';document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+ document.querySelectorAll('main section').forEach(s=>s.hidden=s.id!==tab);refresh()});
+async function loadDash(){const s=await api('GET','/v1/admin/stats');
+ const k=[['Today',s.today],['7 days',s.week],['This month',s.month]].map(([n,v])=>`<div class=card><div class=k>${n}</div><div class=v>Rs ${v.amount}</div><div class=k>${v.count} payments</div></div>`);
+ k.push(`<div class=card><div class=k>Need review</div><div class=v>${s.unmatched}</div><div class=k>unmatched payments</div></div>`);
+ k.push(`<div class=card><div class=k>Open orders</div><div class=v>${s.open_orders}</div><div class=k>${s.uncredited} paid, not yet credited</div></div>`);
+ $('kpi').innerHTML=k.join('');const mx=Math.max(1,...s.days.map(d=>+d.amount));
+ $('days').innerHTML=s.days.map(d=>`<div style="display:flex;gap:8px;align-items:center;margin:5px 0"><span style="width:56px" class=k>${esc(d.day)}</span><div style="flex:1"><div class=bar style="width:${(+d.amount/mx*100).toFixed(1)}%"></div></div><span style="width:120px;text-align:right">Rs ${d.amount} · ${d.count}</span></div>`).join('');
+ $('devs').innerHTML=s.devices.map(d=>`<div>${pill(d.revoked?'revoked':d.online?'online':'offline')} ${esc(d.name)} <span class=k>last seen ${pk(d.last_seen)||'never'}</span></div>`).join('')||'No phone registered'}
+function pq(){const p=new URLSearchParams();if($('pq').value)p.set('q',$('pq').value);if($('ps').value)p.set('status',$('ps').value);return p.toString()}
+async function loadPay(){const r=await api('GET','/v1/admin/payments?'+pq());
+ table('pt',['Received','Trx ID','Amount','Sender','Number','Status','Order','Action'],r.map(p=>`<tr><td>${pk(p.received_at)}</td><td>${esc(p.tid)}</td><td>Rs ${p.amount}</td><td>${esc(p.sender)}</td><td>${esc(p.account)}</td><td>${pill(p.status)}${p.note?'<br><span class=k>'+esc(p.note)+'</span>':''}</td><td>${esc(p.order_id||'')}</td>
+ <td>${p.order_id?'':`<button class="b w" onclick="pst('${esc(p.tid)}','rejected')">Reject</button> <button class="b g" onclick="pst('${esc(p.tid)}','refunded')">Refunded</button>`}</td></tr>`))}
+async function pst(t,s){const n=prompt('Note for '+s+' (optional)')??'';await api('POST','/v1/admin/payments/'+t+'/status',{status:s,note:n});toast('Saved');loadPay()}
+async function csv(){const r=await fetch('/v1/admin/export/payments.csv?'+pq(),{headers:{'X-Admin-Key':$('key').value}});if(!r.ok)return toast('Export failed');
+ const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download='payments.csv';a.click()}
+async function loadOrd(){const r=await api('GET','/v1/admin/orders?status='+$('os').value);
+ table('ot',['Created','Order','Amount','Source','Discord user','Status','Trx ID','Credited','Action'],r.map(o=>`<tr><td>${pk(o.created)}</td><td>${esc(o.id)}</td><td>Rs ${o.amount}</td><td>${esc(o.source)}${o.note?'<br><span class=k>'+esc(o.note)+'</span>':''}</td><td>${esc(o.discord_user_id||'')}</td><td>${pill(o.status)}</td><td>${esc(o.payment_tid||'')}</td><td>${o.discord_user_id?(o.credited?'yes':'pending'):''}</td>
+ <td>${o.status==='open'||o.status==='expired'?`<button class=b onclick="appr('${esc(o.id)}')">Approve</button> `:''}${o.status==='open'?`<button class="b w" onclick="canc('${esc(o.id)}')">Cancel</button>`:''}</td></tr>`))}
+async function appr(id){const t=prompt('Trx ID of the received payment for this order');if(!t)return;await api('POST','/v1/admin/orders/'+id+'/approve',{trx_id:t.trim()});toast('Approved');loadOrd()}
+async function canc(id){if(!confirm('Cancel order?'))return;await api('POST','/v1/admin/orders/'+id+'/cancel');loadOrd()}
+async function mkOrd(){const o=await api('POST','/v1/admin/orders',{amount:$('oa').value,note:$('on').value});toast('Order '+o.id+' · link copied');try{navigator.clipboard.writeText(o.pay_url)}catch(e){}loadOrd()}
+async function loadDev(){const r=await api('GET','/v1/admin/devices');
+ table('dt',['Name','Status','Last seen','ID','Action'],r.map(d=>`<tr><td>${esc(d.name)}</td><td>${pill(d.revoked?'revoked':d.online?'online':'offline')}</td><td>${pk(d.last_seen)}</td><td style="word-break:break-all">${esc(d.id)}</td><td>${d.revoked?'':`<button class="b w" onclick="rev('${esc(d.id)}')">Revoke</button>`}</td></tr>`))}
+async function mkDev(){const d=await api('POST','/v1/admin/devices',{name:$('dn').value});$('dout').textContent='Device ID:\n'+d.id+'\n\nDevice token (shown once):\n'+d.device_token;loadDev()}
+async function rev(id){if(!confirm('Revoke this phone? It will stop syncing.'))return;await api('POST','/v1/admin/devices/'+id+'/revoke');loadDev()}
+async function loadAud(){const r=await api('GET','/v1/admin/audit');table('at',['Time','Who','Action','Ref','Detail'],r.map(a=>`<tr><td>${pk(a.at)}</td><td>${esc(a.actor)}</td><td>${esc(a.action)}</td><td>${esc(a.ref)}</td><td>${esc(a.detail)}</td></tr>`))}
+function refresh(){if(!$('key').value)return;({dash:loadDash,pay:loadPay,ord:loadOrd,dev:loadDev,aud:loadAud})[tab]().catch(()=>{})}
+refresh();setInterval(()=>{if(tab==='dash')refresh()},30000);
+</script></body></html>

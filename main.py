@@ -38,6 +38,7 @@ class AyoBot(commands.Bot):
         await self.load_extension("cogs.crash")
         await self.load_extension("cogs.coinflip")
         await self.load_extension("cogs.global_crash")
+        await self.load_extension("cogs.deposit")
 
 
 bot = AyoBot(
