@@ -53,3 +53,11 @@ the payment must not predate the order, and a Trx ID can fulfil only one order (
 
 Free tier notes: the service sleeps after ~15 min idle (first request is slow, the app retries) and its
 disk is wiped on restart, so orders/payments reset; the seeded device survives.
+
+## Customer "Pay now" page
+
+`https://YOUR-LINK/` is a public page: enter amount -> shows the wallet number to pay -> customer enters their
+Easypaisa number + Transaction ID -> approved only if that exact payment arrived from the phone app
+(amount equal, number matches the masked sender number, Trx ID not used before, payment not older than the order).
+Set the number shown to customers with env vars `PAY_NUMBER` (and optional `PAY_NAME`, `PUBLIC_MAX`, default 50000).
+`/health` returns server status; `/admin` is the admin page.

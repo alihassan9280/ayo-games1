@@ -105,6 +105,65 @@ function ls(){call('GET','/v1/admin/payments',null,1)}
 </script></body></html>"""
 
 
+def norm_number(raw):
+    """03004123413 / +92 300 4123413 / 923004123413 -> '923004123413' (or None)."""
+    d = re.sub(r"\D", "", str(raw or ""))
+    if d.startswith("0092"):
+        d = d[2:]
+    if d.startswith("0"):
+        d = "92" + d[1:]
+    return d if re.fullmatch(r"92\d{10}", d) else None
+
+
+def mask_matches(masked, number):
+    return len(masked) == len(number) and all(m in ("*", n) for m, n in zip(masked, number))
+
+
+PAY_HTML = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Pay now</title>
+<style>*{box-sizing:border-box}body{font:16px system-ui;margin:0;background:#f4f6f5;color:#16231c}
+.c{max-width:440px;margin:0 auto;padding:20px}.card{background:#fff;border-radius:14px;padding:18px;margin-top:14px;box-shadow:0 1px 4px #0001}
+h2{margin:6px 0}input,button{font:inherit;width:100%;padding:13px;margin-top:10px;border-radius:10px;border:1px solid #bcc7c0}
+button{background:#1a7f4b;color:#fff;border:0;font-weight:600}button.sec{background:#e6ece8;color:#16231c}
+.big{font-size:26px;font-weight:700}.num{font-size:22px;font-weight:700;letter-spacing:.5px;word-break:break-all}
+.ok{color:#116b3a}.bad{color:#b3261e}.muted{color:#5b6b62;font-size:14px}[hidden]{display:none}</style></head><body><div class=c>
+<h2>Pay now</h2>
+<div class=card id=s1><div>Enter amount (Rs)</div><input id=amt inputmode=decimal value="100">
+<button id=ok1>OK</button><div id=m1 class="muted bad"></div></div>
+<div class=card id=s2 hidden><div class=muted>Send exactly</div><div class=big id=pa></div>
+<div class=muted style="margin-top:10px">via Easypaisa to <span id=pn></span></div><div class=num id=pnum></div>
+<div class=muted>Order expires in <span id=left></span></div>
+<hr style="border:0;border-top:1px solid #e3e8e5;margin:16px 0">
+<div>After paying, enter your details</div>
+<input id=num inputmode=tel placeholder="Your Easypaisa number (03xx xxxxxxx)">
+<input id=tid inputmode=numeric placeholder="Transaction ID (Trx ID)">
+<button id=ok2>OK</button><button class=sec id=cancel>Start over</button><div id=m2 class="muted"></div></div>
+<div class=card id=s3 hidden><div class="big ok">&#10003; Payment approved</div>
+<div id=done class=muted style="margin-top:8px"></div><button class=sec id=again>New payment</button></div>
+</div><script>
+const $=i=>document.getElementById(i),S=(i,on)=>$(i).hidden=!on;let order=null,cfg={},timer=null;
+const store={get(){try{return JSON.parse(localStorage.getItem('ord')||'null')}catch(e){return null}},
+ set(v){try{v?localStorage.setItem('ord',JSON.stringify(v)):localStorage.removeItem('ord')}catch(e){}}};
+async function j(u,b){const r=await fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{});
+ let d={};try{d=await r.json()}catch(e){}return{s:r.status,d}}
+function show(o){order=o;store.set(o);$('pa').textContent='Rs '+o.amount;$('pn').textContent=cfg.pay_name?'('+cfg.pay_name+')':'';
+ $('pnum').textContent=cfg.pay_number||'(merchant number not set)';S('s1',0);S('s2',1);S('s3',0);clearInterval(timer);
+ const tick=()=>{const t=Math.max(0,Math.floor((new Date(o.expires)-Date.now())/1000));$('left').textContent=Math.floor(t/60)+':'+String(t%60).padStart(2,'0');
+  if(!t){clearInterval(timer);$('m2').textContent='Order expired. Start over.';$('m2').className='muted bad'}};tick();timer=setInterval(tick,1000)}
+function reset(){clearInterval(timer);order=null;store.set(null);S('s1',1);S('s2',0);S('s3',0);$('m1').textContent='';$('m2').textContent=''}
+$('ok1').onclick=async()=>{$('m1').textContent='';const r=await j('/v1/orders',{amount:$('amt').value.trim()});
+ if(r.s==201)show(r.d);else $('m1').textContent=r.d.error||'Could not create order'};
+$('ok2').onclick=async()=>{const m=$('m2');m.className='muted';m.textContent='Checking...';
+ const r=await j('/v1/orders/'+encodeURIComponent(order.id)+'/verify',{trx_id:$('tid').value.trim(),sender:$('num').value.trim()});
+ if(r.d.verified){clearInterval(timer);store.set(null);S('s2',0);S('s3',1);$('done').textContent='Rs '+order.amount+' received. Thank you!'}
+ else{m.className='muted bad';m.textContent=r.d.reason?({'payment not received yet':'Payment not received yet. Wait a few seconds after paying and try again.'}[r.d.reason]||r.d.reason):(r.d.error||'Not verified')}};
+$('cancel').onclick=reset;$('again').onclick=reset;
+(async()=>{cfg=(await j('/v1/public-config')).d;const o=store.get();
+ if(o){const r=await j('/v1/orders/'+encodeURIComponent(o.id));
+  if(r.s==200&&r.d.status==='open')show({...o,expires:r.d.expires});else reset()}})();
+</script></body></html>"""
+
+
 def create_app(db_path=None, admin_key=None, auto_approve=None):
     app = Flask(__name__)
     app.config["DB"] = db_path or os.getenv("DB_PATH", "backend/payments.sqlite3")
@@ -137,6 +196,11 @@ def create_app(db_path=None, admin_key=None, auto_approve=None):
                 raise SystemExit("DEVICE_ID must be a UUID and DEVICE_TOKEN 64 lowercase hex chars")
             c.execute("INSERT OR IGNORE INTO devices(id,name,token_hash,created) VALUES(?,?,?,?)",
                       (seed_id, "seeded-device", hashlib.sha256(seed_tok.encode()).hexdigest(), iso(now())))
+
+    def client_ip():
+        # behind a Cloudflare tunnel every request comes from localhost; use the real client IP
+        fwd = request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For", "")
+        return fwd.split(",")[0].strip() or request.remote_addr or ""
 
     def err(code, msg):
         return jsonify({"error": msg}), code
@@ -284,6 +348,32 @@ def create_app(db_path=None, admin_key=None, auto_approve=None):
         return jsonify({"accepted": True, "duplicate": duplicate, "order_id": matched})
 
     # ---------- customer / order flow ----------
+    @app.get("/v1/public-config")
+    def public_config():
+        return jsonify({"pay_number": os.getenv("PAY_NUMBER", ""), "pay_name": os.getenv("PAY_NAME", ""),
+                        "max_amount": int(os.getenv("PUBLIC_MAX", "50000"))})
+
+    @app.post("/v1/orders")
+    def create_public_order():
+        """Customer 'Pay now': create an order for an amount (rate limited, capped)."""
+        if limited("ordip:" + client_ip(), limit=10):
+            return err(429, "Too many requests, try again in a minute")
+        try:
+            amount = Decimal(str((request.get_json(silent=True) or {}).get("amount")).strip())
+            paisa = int((amount * 100).to_integral_exact())
+        except (InvalidOperation, ValueError, TypeError):
+            return err(400, "Enter a valid amount")
+        top = int(os.getenv("PUBLIC_MAX", "50000"))
+        if amount != amount.quantize(Decimal("0.01")) or not 1 <= paisa <= top * 100:
+            return err(400, f"Amount must be between Rs 1 and Rs {top}")
+        expire_orders()
+        if db().execute("SELECT count(*) FROM orders WHERE status='open'").fetchone()[0] >= 500:
+            return err(503, "Busy, try again shortly")
+        oid, t = secrets.token_urlsafe(9), now()
+        db().execute("INSERT INTO orders(id,amount,note,created,expires) VALUES(?,?,?,?,?)",
+                     (oid, paisa, "public", iso(t), iso(t + ORDER_TTL)))
+        return jsonify({"id": oid, "amount": f"{paisa/100:.2f}", "expires": iso(t + ORDER_TTL)}), 201
+
     @app.get("/v1/orders/<oid>")
     def order_status(oid):
         expire_orders()
@@ -295,11 +385,17 @@ def create_app(db_path=None, admin_key=None, auto_approve=None):
 
     @app.post("/v1/orders/<oid>/verify")
     def verify(oid):
-        if limited("ip:" + (request.remote_addr or ""), limit=20):
+        if limited("ip:" + client_ip(), limit=20):
             return err(429, "rate limited")
-        tid = str((request.get_json(silent=True) or {}).get("trx_id", "")).strip()
+        body = request.get_json(silent=True) or {}
+        tid = str(body.get("trx_id", "")).strip()
         if not re.fullmatch(r"\d{6,30}", tid):
-            return err(400, "trx_id must be digits")
+            return err(400, "Enter the Transaction ID (digits only)")
+        number = norm_number(body.get("sender"))
+        if not number:
+            return err(400, "Enter your Easypaisa number, e.g. 03001234567")
+        if limited("ord:" + oid, limit=15, window=600):   # stop TID guessing per order
+            return err(429, "Too many attempts for this order")
         expire_orders()
         c = db()
         o = c.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
@@ -318,6 +414,8 @@ def create_app(db_path=None, admin_key=None, auto_approve=None):
             return jsonify({"verified": False, "reason": "transaction already used"})
         if p["amount"] != o["amount"]:
             return jsonify({"verified": False, "reason": "amount mismatch"})
+        if not mask_matches(p["account"], number):
+            return jsonify({"verified": False, "reason": "number does not match this payment"})
         if parse_iso(p["observed_at"]) < parse_iso(o["created"]) - VERIFY_SKEW:
             return jsonify({"verified": False, "reason": "payment older than order"})
         if not claim(oid, tid):
@@ -329,6 +427,10 @@ def create_app(db_path=None, admin_key=None, auto_approve=None):
         return ADMIN_HTML, 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}
 
     @app.get("/")
+    def pay_page():
+        return PAY_HTML, 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}
+
+    @app.get("/health")
     def root():
         return jsonify({"service": "ayo-payment-test-backend", "ok": True,
                         "auto_approve": app.config["AUTO_APPROVE"]})

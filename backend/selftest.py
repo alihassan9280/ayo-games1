@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from app import create_app  # noqa: E402
 
 ADMIN = {"X-Admin-Key": "test-admin-key"}
+NUM = "0300 4123413"   # matches masked 923004****13
 
 
 def stamp(delta=0):
@@ -43,13 +44,14 @@ def run(auto):
         assert c.get("/v1/orders/" + order["id"]).get_json()["status"] == "paid"
     else:   # manual verify by Trx ID
         assert r.get_json()["order_id"] is None
-        v = c.post(f"/v1/orders/{order['id']}/verify", json={"trx_id": "99999999999"}).get_json()
+        v = c.post(f"/v1/orders/{order['id']}/verify", json={"trx_id": "99999999999", "sender": NUM}).get_json()
         assert v["verified"] is False
-        v = c.post(f"/v1/orders/{order['id']}/verify", json={"trx_id": "12345678901"}).get_json()
+        v = c.post(f"/v1/orders/{order['id']}/verify", json={"trx_id": "12345678901", "sender": NUM}).get_json()
         assert v["verified"] is True, v
+    # wrong sender number is refused even with a real TID (checked on a fresh order below)
     # verifying again must not fulfil twice for another order
     o2 = c.post("/v1/admin/orders", json={"amount": "8.00"}, headers=ADMIN).get_json()
-    v = c.post(f"/v1/orders/{o2['id']}/verify", json={"trx_id": "12345678901"}).get_json()
+    v = c.post(f"/v1/orders/{o2['id']}/verify", json={"trx_id": "12345678901", "sender": NUM}).get_json()
     assert v["verified"] is False and "already used" in v["reason"], v
 
     r = pay(text("12345678901"))                                                    # retry = idempotent
@@ -61,13 +63,33 @@ def run(auto):
     # wrong amount never verifies
     o3 = c.post("/v1/admin/orders", json={"amount": "50.00"}, headers=ADMIN).get_json()
     pay(text("44444444444", "10.00"))
-    v = c.post(f"/v1/orders/{o3['id']}/verify", json={"trx_id": "44444444444"}).get_json()
+    v = c.post(f"/v1/orders/{o3['id']}/verify", json={"trx_id": "44444444444", "sender": NUM}).get_json()
     assert v["verified"] is False and v["reason"] == "amount mismatch"
     # payment older than the order is rejected for verification
     o4 = c.post("/v1/admin/orders", json={"amount": "7.00"}, headers=ADMIN).get_json()
     pay(text("55555555555", "7.00"), stamp(-600))
-    v = c.post(f"/v1/orders/{o4['id']}/verify", json={"trx_id": "55555555555"}).get_json()
+    v = c.post(f"/v1/orders/{o4['id']}/verify", json={"trx_id": "55555555555", "sender": NUM}).get_json()
     assert v["verified"] is False and "older" in v["reason"], v
+
+    # public "Pay now" flow: customer creates order, pays, enters number + TID
+    assert b"Pay now" in c.get("/").data and c.get("/health").get_json()["ok"]
+    pub = c.post("/v1/orders", json={"amount": "100"}).get_json()
+    assert pub["amount"] == "100.00"
+    assert c.post("/v1/orders", json={"amount": "abc"}).status_code == 400
+    assert c.post("/v1/orders", json={"amount": "0"}).status_code == 400
+    assert c.post("/v1/orders", json={"amount": "999999"}).status_code == 400
+    pay(text("66666666666", "100.00"))
+    if not auto:   # (auto mode approves a unique same-amount order straight away)
+        bad = c.post(f"/v1/orders/{pub['id']}/verify", json={"trx_id": "66666666666", "sender": "03111111199"}).get_json()
+        assert bad["verified"] is False and "number" in bad["reason"], bad
+        assert c.post(f"/v1/orders/{pub['id']}/verify", json={"trx_id": "66666666666"}).status_code == 400  # number required
+        ok = c.post(f"/v1/orders/{pub['id']}/verify", json={"trx_id": "66666666666", "sender": "+92 300 4123413"}).get_json()
+        assert ok["verified"] is True, ok
+    else:
+        assert c.get("/v1/orders/" + pub["id"]).get_json()["status"] == "paid"
+    fake = c.post("/v1/orders", json={"amount": "100"}).get_json()
+    f = c.post(f"/v1/orders/{fake['id']}/verify", json={"trx_id": "77777777777", "sender": NUM}).get_json()
+    assert f["verified"] is False and "not received" in f["reason"]   # fake TID is rejected
 
     assert c.post(f"/v1/admin/devices/{dev['id']}/revoke", headers=ADMIN).status_code == 200
     assert c.post("/v1/device/heartbeat", headers=H).status_code == 403
