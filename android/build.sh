@@ -10,7 +10,7 @@ rm -rf build && mkdir -p build/gen build/classes build/dex
 mkdir -p build/test && javac -d build/test src/com/ayo/paymenthelper/PaymentParser.java tests/ParserTest.java && java -cp build/test ParserTest
 # 2) resources -> R.java + compiled resources
 "$BT/aapt2" compile --dir res -o build/res.zip
-"$BT/aapt2" link -o build/base.apk --manifest AndroidManifest.xml -I "$JAR" --java build/gen --min-sdk-version 26 --target-sdk-version 35
+"$BT/aapt2" link -o build/base.apk --manifest AndroidManifest.xml -I "$JAR" --java build/gen --min-sdk-version 26 --target-sdk-version 35 build/res.zip
 # 3) compile Java
 find src build/gen -name '*.java' > build/srcs.txt
 javac -encoding UTF-8 --release 8 -classpath "$JAR" -d build/classes @build/srcs.txt
