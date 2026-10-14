@@ -14,8 +14,9 @@ mkdir -p build/test && javac -d build/test src/com/ayo/paymenthelper/PaymentPars
 # 3) compile Java
 find src build/gen -name '*.java' > build/srcs.txt
 javac -encoding UTF-8 --release 8 -classpath "$JAR" -d build/classes @build/srcs.txt
+jar cf build/classes.jar -C build/classes .
 # 4) dex
-"$BT/d8" --lib "$JAR" --min-api 26 --release --output build/dex build/classes
+"$BT/d8" --lib "$JAR" --min-api 26 --release --output build/dex build/classes.jar
 # 5) add dex into the apk
 ( cd build/dex && zip -q ../base.apk classes.dex )
 # 6) align + sign
