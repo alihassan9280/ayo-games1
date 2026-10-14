@@ -20,9 +20,11 @@ jobs:
           java-version: '17'
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
       - name: Install platform + build-tools
         run: |
-          yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" >/dev/null
+          yes | sdkmanager "platforms;android-35" "build-tools;35.0.0"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
       - name: Build APK
         working-directory: android
