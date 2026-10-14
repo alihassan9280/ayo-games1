@@ -86,6 +86,25 @@ def parse_payment(text):
             "account": m.group(4), "text": t}
 
 
+ADMIN_HTML = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>AYO test admin</title>
+<style>body{font:16px system-ui;margin:16px;max-width:560px}input,button{font:inherit;padding:10px;margin:4px 0;width:100%;box-sizing:border-box}
+button{background:#1a7f4b;color:#fff;border:0;border-radius:8px}pre{background:#f2f2f2;padding:10px;white-space:pre-wrap;word-break:break-all;border-radius:8px}
+h3{margin:18px 0 4px}</style></head><body><h2>AYO test admin</h2>
+<input id=key type=password placeholder="ADMIN_KEY" autocomplete=off>
+<h3>1. New order</h3><input id=amt inputmode=decimal placeholder="Amount e.g. 8.00"><button onclick="mk()">Create order</button>
+<h3>2. Verify payment</h3><input id=oid placeholder="Order id"><input id=tid inputmode=numeric placeholder="Transaction ID">
+<button onclick="vf()">Verify</button><h3>3. Received payments</h3><button onclick="ls()">Refresh list</button><pre id=out>ready</pre>
+<script>
+const o=document.getElementById('out'),$=i=>document.getElementById(i).value.trim();
+async function call(m,u,b,a){const r=await fetch(u,{method:m,headers:{'Content-Type':'application/json',...(a?{'X-Admin-Key':$('key')}:{})},body:b?JSON.stringify(b):undefined});
+ const t=await r.text();let j;try{j=JSON.stringify(JSON.parse(t),null,1)}catch(e){j=t}o.textContent=r.status+'\n'+j;return t}
+async function mk(){const t=await call('POST','/v1/admin/orders',{amount:$('amt')},1);try{document.getElementById('oid').value=JSON.parse(t).id||''}catch(e){}}
+function vf(){call('POST','/v1/orders/'+encodeURIComponent($('oid'))+'/verify',{trx_id:$('tid')})}
+function ls(){call('GET','/v1/admin/payments',null,1)}
+</script></body></html>"""
+
+
 def create_app(db_path=None, admin_key=None, auto_approve=None):
     app = Flask(__name__)
     app.config["DB"] = db_path or os.getenv("DB_PATH", "backend/payments.sqlite3")
@@ -111,6 +130,13 @@ def create_app(db_path=None, admin_key=None, auto_approve=None):
 
     with sqlite3.connect(app.config["DB"]) as c:
         c.executescript(SCHEMA)
+        # Free hosts wipe the disk on restart: optionally pre-register one device from env.
+        seed_id, seed_tok = os.getenv("DEVICE_ID", ""), os.getenv("DEVICE_TOKEN", "")
+        if seed_id and seed_tok:
+            if not (re.fullmatch(r"[0-9a-fA-F-]{36}", seed_id) and re.fullmatch(r"[0-9a-f]{64}", seed_tok)):
+                raise SystemExit("DEVICE_ID must be a UUID and DEVICE_TOKEN 64 lowercase hex chars")
+            c.execute("INSERT OR IGNORE INTO devices(id,name,token_hash,created) VALUES(?,?,?,?)",
+                      (seed_id, "seeded-device", hashlib.sha256(seed_tok.encode()).hexdigest(), iso(now())))
 
     def err(code, msg):
         return jsonify({"error": msg}), code
@@ -297,6 +323,10 @@ def create_app(db_path=None, admin_key=None, auto_approve=None):
         if not claim(oid, tid):
             return jsonify({"verified": False, "reason": "could not claim; retry"})
         return jsonify({"verified": True, "sender": p["sender"]})
+
+    @app.get("/admin")
+    def admin_page():
+        return ADMIN_HTML, 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}
 
     @app.get("/")
     def root():

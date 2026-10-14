@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: ayo-payment-test
+    runtime: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    # one worker: rate limits are in-memory and SQLite is single-writer friendly
+    startCommand: gunicorn --chdir backend -w 1 --threads 4 -b 0.0.0.0:$PORT "app:create_app()"
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: AUTO_APPROVE
+        value: "0"
+      - key: DB_PATH
+        value: /tmp/payments.sqlite3
+      - key: DEVICE_ID
+        sync: false
+      - key: DEVICE_TOKEN
+        sync: false

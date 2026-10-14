@@ -40,3 +40,16 @@ the payment must not predate the order, and a Trx ID can fulfil only one order (
 ## Checks
 
     python backend/selftest.py     # simulates the phone against every endpoint
+
+## Mobile-only setup (no PC): deploy free on Render
+
+1. Merge the PR (or pick this branch) and open https://dashboard.render.com -> New -> Blueprint
+   -> connect the GitHub repo. `render.yaml` at the repo root configures everything.
+2. When asked for `DEVICE_ID` and `DEVICE_TOKEN`, enter a UUID and a 64-char lowercase hex string
+   (any random values; the same two go into the app). `ADMIN_KEY` is generated: see it in
+   Render -> service -> Environment.
+3. Your link is `https://<service>.onrender.com`. In the app: URL = that link, Device ID/Token = step 2.
+4. Open `https://<service>.onrender.com/admin` on the phone to create orders, verify Trx IDs, list payments.
+
+Free tier notes: the service sleeps after ~15 min idle (first request is slow, the app retries) and its
+disk is wiped on restart, so orders/payments reset; the seeded device survives.
