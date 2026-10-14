@@ -36,6 +36,7 @@ MAX_PAISA = 100_000_000          # Rs 1,000,000, same cap as the app
 MAX_AGE = timedelta(days=7)      # app flags older items itself
 FUTURE_SKEW = timedelta(minutes=5)
 VERIFY_SKEW = timedelta(minutes=2)   # phone clock vs server clock
+LOOKBACK = timedelta(minutes=int(os.getenv("VERIFY_LOOKBACK_MIN", "30")))  # pay-then-order tolerance
 ORDER_TTL = timedelta(minutes=30)
 
 SCHEMA = """
@@ -416,8 +417,11 @@ def create_app(db_path=None, admin_key=None, auto_approve=None):
             return jsonify({"verified": False, "reason": "amount mismatch"})
         if not mask_matches(p["account"], number):
             return jsonify({"verified": False, "reason": "number does not match this payment"})
-        if parse_iso(p["observed_at"]) < parse_iso(o["created"]) - VERIFY_SKEW:
-            return jsonify({"verified": False, "reason": "payment older than order"})
+        paid_at, ordered_at = parse_iso(p["observed_at"]), parse_iso(o["created"])
+        if paid_at < ordered_at - LOOKBACK:
+            mins = int((ordered_at - paid_at).total_seconds() // 60)
+            return jsonify({"verified": False,
+                            "reason": f"payment is {mins} min older than this order; create a new order and pay again"})
         if not claim(oid, tid):
             return jsonify({"verified": False, "reason": "could not claim; retry"})
         return jsonify({"verified": True, "sender": p["sender"]})

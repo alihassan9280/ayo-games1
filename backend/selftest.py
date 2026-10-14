@@ -67,9 +67,14 @@ def run(auto):
     assert v["verified"] is False and v["reason"] == "amount mismatch"
     # payment older than the order is rejected for verification
     o4 = c.post("/v1/admin/orders", json={"amount": "7.00"}, headers=ADMIN).get_json()
-    pay(text("55555555555", "7.00"), stamp(-600))
+    pay(text("55555555555", "7.00"), stamp(-3600))
     v = c.post(f"/v1/orders/{o4['id']}/verify", json={"trx_id": "55555555555", "sender": NUM}).get_json()
     assert v["verified"] is False and "older" in v["reason"], v
+    # pay-then-order within the lookback window is accepted
+    o5 = c.post("/v1/admin/orders", json={"amount": "6.00"}, headers=ADMIN).get_json()
+    pay(text("88888888888", "6.00"), stamp(-600))
+    v = c.post(f"/v1/orders/{o5['id']}/verify", json={"trx_id": "88888888888", "sender": NUM}).get_json()
+    assert v["verified"] is True, v
 
     # public "Pay now" flow: customer creates order, pays, enters number + TID
     assert b"Pay now" in c.get("/").data and c.get("/health").get_json()["ok"]
