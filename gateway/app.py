@@ -339,7 +339,7 @@ def create_app(db_path=None, admin_key=None, auto_approve=None, bot_key=None, st
     # ------------------------------------------------------------ public (customer)
     @app.get("/v1/public-config")
     def public_config():
-        return jsonify({"pay_number": os.getenv("PAY_NUMBER", ""), "pay_name": os.getenv("PAY_NAME", ""),
+        return jsonify({"pay_number": os.getenv("PAY_NUMBER", "03004457501"), "pay_name": os.getenv("PAY_NAME", "Ali Hassan - Easypaisa"),
                         "max_amount": int(os.getenv("PUBLIC_MAX", "50000")),
                         "min_amount": int(os.getenv("PUBLIC_MIN", "1"))})
 

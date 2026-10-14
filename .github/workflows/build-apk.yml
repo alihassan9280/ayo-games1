@@ -1,0 +1,43 @@
+name: Build AYO Payment Helper APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ccr-8aff8cfe-4w1p8c]
+    paths: ['android/**', '.github/workflows/build-apk.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install platform + build-tools
+        run: |
+          yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" >/dev/null
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+      - name: Build APK
+        working-directory: android
+        run: bash build.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AYO-Payment-Helper
+          path: android/AYO-Payment-Helper.apk
+      - name: Publish release with download link
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-v2
+          name: AYO Payment Helper v2
+          files: android/AYO-Payment-Helper.apk
+          body: |
+            Latest AYO Payment Helper APK. Download the .apk below on your Android phone and install it.
+            Pay-to details are configured on the server (Easypaisa 03004457501, Ali Hassan).
